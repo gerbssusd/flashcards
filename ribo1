@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Narrative Vocabulary Trainer</title>
+<style>
+* { box-sizing: border-box; }
+body { margin:0; padding:15px; font-family:system-ui, Arial,sans-serif; background:#f4f6f8; text-align:center; }
+h1 { font-size:1.8rem; }
+button { padding:12px; margin:5px; font-size:1rem; border-radius:8px; border:none; background:#3f51b5; color:white; }
+button.secondary { background:#607d8b; }
+button:active { transform: scale(.97); }
+.section { display:none; }
+.score { font-weight:bold; margin:10px 0; }
+
+/* FLASHCARDS */
+.flashcard { max-width:350px; height:200px; margin:20px auto; perspective:1000px; }
+.flash-inner { width:100%; height:100%; transition:transform .6s; transform-style:preserve-3d; }
+.flashcard.flip .flash-inner { transform:rotateY(180deg); }
+.face { position:absolute; width:100%; height:100%; backface-visibility:hidden; background:white; border-radius:12px; padding:20px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 10px rgba(0,0,0,.2); }
+.back { transform:rotateY(180deg); background:#e8eaf6; }
+
+/* QUIZ */
+.choice { width:100%; max-width:400px; margin:6px auto; background:white; border:1px solid #ccc; color:black; }
+.feedback { font-weight:bold; margin-top:10px; }
+.correctText { color:#2e7d32; }
+.wrongText { color:#c62828; }
+
+/* MATCH */
+.match-grid { display:flex; flex-direction:column; gap:12px; }
+.column { flex:1; }
+.draggable, .dropzone { background:white; padding:10px; border-radius:8px; border:2px dashed #ccc; margin-bottom:8px; user-select:none; }
+.draggable { cursor:grab; }
+.correct { background:#c8e6c9; border-color:#2e7d32; }
+.wrong { background:#ffcdd2; border-color:#c62828; }
+@media(min-width:700px) { .match-grid { flex-direction:row; } }
+</style>
+</head>
+<body>
+<h1>Narrative Vocabulary Trainer</h1>
+
+<div class="score">
+Score: <span id="score">0</span> | Accuracy: <span id="accuracy">0%</span>
+</div>
+
+<button class="secondary" onclick="toggleSound()">🔊 Sound: <span id="soundStatus">ON</span></button>
+
+<div>
+<button onclick="startFlash()">Flashcards</button>
+<button onclick="startQuiz()">Timed Quiz</button>
+<button onclick="startMatch()">Drag Match</button>
+</div>
+
+<!-- FLASHCARDS -->
+<div id="flash" class="section">
+<div class="flashcard" onclick="flip()">
+<div class="flash-inner">
+<div class="face" id="front"></div>
+<div class="face back" id="back"></div>
+</div>
+</div>
+<button onclick="speak()">🔊 Pronounce</button><br>
+<button onclick="rate(true)">Got it 👍</button>
+<button onclick="rate(false)">Missed it ❌</button>
+</div>
+
+<!-- QUIZ -->
+<div id="quiz" class="section">
+<h3>Time: <span id="time">10</span>s</h3>
+<p id="question"></p>
+<div id="choices"></div>
+<div id="feedback" class="feedback"></div>
+</div>
+
+<!-- SUMMARY -->
+<div id="summary" class="section">
+<h2>Quiz Summary</h2>
+<p>Correct: <span id="sumCorrect"></span></p>
+<p>Total: <span id="sumTotal"></span></p>
+<p>Accuracy: <span id="sumAccuracy"></span>%</p>
+<button onclick="startQuiz()">Restart Quiz</button>
+</div>
+
+<!-- MATCH -->
+<div id="match" class="section">
+<h3>Drag the term onto the correct definition</h3>
+<div class="match-grid">
+<div class="column" id="terms"></div>
+<div class="column" id="defs"></div>
+</div>
+</div>
+
+<script>
+/* VOCABULARY */
+const vocab = [
+["Adaptation","A work based on a story previously told in a different medium."],
+["Discourse","The means through which a narrative is communicated by the implied author to the implied reader."],
+["Event","A change of state occurring in the storyworld."],
+["Fiction","A narrative that represents imagined characters, events, and environments."],
+["Genre","Conventional grouping of texts based on shared features."],
+["Implied author","The projection of the real author inferred from the text."],
+["Implied reader","The virtual reader addressed by the implied author."],
+["Lifeworld","The world experienced by writers and readers."],
+["Limited narrator","A narrator with limited knowledge of inner states."],
+["Narratee","The figure to whom a story is told."],
+["Narrative","A representation of events connected by time and cause."],
+["Narratology","The study of narratives."],
+["Narrator","The figure that tells the story."],
+["Nonfiction","Narrative claiming real-world truth."],
+["Novel","A long fictional prose narrative."],
+["Novella","Fiction longer than a short story, shorter than a novel."],
+["Prose","Language without metrical structure."],
+["Semiotics","Study of meaning through signs."],
+["Short story","Brief fictional prose narrative."],
+["Verse","Language arranged in meter and rhythm."]
+];
+
+/* SCORE */
+let score = Number(localStorage.getItem("score")) || 0;
+document.getElementById("score").textContent = score;
+function addScore(n){ score=Math.max(0,score+n); localStorage.setItem("score",score); document.getElementById("score").textContent=score; }
+
+/* SOUND */
+let soundOn = localStorage.getItem("sound")!=="off";
+document.getElementById("soundStatus").textContent = soundOn ? "ON":"OFF";
+function toggleSound(){ soundOn=!soundOn; localStorage.setItem("sound",soundOn?"on":"off"); document.getElementById("soundStatus").textContent=soundOn?"ON":"OFF"; }
+function playTone(freq){ if(!soundOn) return; const ctx=new AudioContext(); const osc=ctx.createOscillator(); osc.frequency.value=freq; osc.connect(ctx.destination); osc.start(); setTimeout(()=>osc.stop(),150); }
+
+/* UTILITY */
+function hideAll(){ document.querySelectorAll(".section").forEach(s=>s.style.display="none"); }
+let stats = {}; vocab.forEach(v=>stats[v[0]]??=1);
+function weightedPick(){ let pool=[]; vocab.forEach(v=>{ for(let i=0;i<stats[v[0]];i++) pool.push(v); }); return pool[Math.floor(Math.random()*pool.length)]; }
+
+/* FLASHCARDS */
+let current;
+function startFlash(){
+  hideAll(); document.getElementById("flash").style.display="block";
+  current=weightedPick();
+  document.getElementById("front").textContent=current[0];
+  document.getElementById("back").textContent=current[1];
+  document.querySelector(".flashcard").classList.remove("flip");
+}
+function flip(){ document.querySelector(".flashcard").classList.toggle("flip"); }
+function rate(ok){ stats[current[0]] += ok?-1:2; stats[current[0]]=Math.max(1,stats[current[0]]); localStorage.setItem("stats",JSON.stringify(stats)); addScore(ok?5:-2); startFlash(); }
+function speak(){ speechSynthesis.speak(new SpeechSynthesisUtterance(current[0])); }
+
+/* QUIZ */
+let quizTotal=0, quizCorrect=0, timer, time;
+function startQuiz(){
+  hideAll();
+  quizTotal=quizCorrect=0;
+  document.getElementById("accuracy").textContent="0%";
+  document.getElementById("quiz").style.display="block";
+  nextQuestion();
+}
+function nextQuestion(){
+  if(quizTotal===10){
+    document.getElementById("sumCorrect").textContent=quizCorrect;
+    document.getElementById("sumTotal").textContent=quizTotal;
+    document.getElementById("sumAccuracy").textContent=Math.round(quizCorrect/quizTotal*100);
+    hideAll(); document.getElementById("summary").style.display="block";
+    return;
+  }
+  clearInterval(timer);
+  document.getElementById("feedback").textContent="";
+  time=10; document.getElementById("time").textContent=time;
+  const qv=weightedPick();
+  document.getElementById("question").textContent=qv[1];
+  const choicesEl=document.getElementById("choices");
+  choicesEl.innerHTML="";
+  let opts=[qv[0]];
+  while(opts.length<4){ let r=vocab[Math.floor(Math.random()*vocab.length)][0]; if(!opts.includes(r)) opts.push(r); }
+  opts.sort(()=>Math.random()-.5).forEach(o=>{
+    const b=document.createElement("button");
+    b.className="choice"; b.textContent=o;
+    b.onclick=()=>{
+      clearInterval(timer); quizTotal++;
+      if(o===qv[0]){ quizCorrect++; addScore(10); playTone(700); feedback.textContent="Correct!"; feedback.className="feedback correctText"; }
+      else{ addScore(-5); playTone(200); feedback.innerHTML=`Incorrect<br>Correct answer: <b>${qv[0]}</b>`; feedback.className="feedback wrongText"; }
+      document.getElementById("accuracy").textContent=Math.round(quizCorrect/quizTotal*100)+"%";
+      setTimeout(nextQuestion,1000);
+    };
+    choicesEl.appendChild(b);
+  });
+  timer=setInterval(()=>{
+    time--; document.getElementById("time").textContent=time;
+    if(time<=0){ quizTotal++; nextQuestion(); }
+  },1000);
+}
+
+/* MATCH */
+function startMatch(){
+  hideAll(); document.getElementById("match").style.display="block";
+  const termsEl=document.getElementById("terms");
+  const defsEl=document.getElementById("defs");
+  termsEl.innerHTML=""; defsEl.innerHTML="";
+  const shuffledTerms=[...vocab].sort(()=>Math.random()-.5);
+  const shuffledDefs=[...vocab].sort(()=>Math.random()-.5);
+  shuffledTerms.forEach(v=>{
+    const t=document.createElement("div"); t.textContent=v[0]; t.className="draggable"; t.draggable=true;
+    t.ondragstart=e=>e.dataTransfer.setData("text",v[0]); termsEl.appendChild(t);
+  });
+  shuffledDefs.forEach(v=>{
+    const d=document.createElement("div"); d.textContent=v[1]; d.className="dropzone";
+    d.ondragover=e=>e.preventDefault();
+    d.ondrop=e=>{
+      const dropped=e.dataTransfer.getData("text");
+      const correct=vocab.find(x=>x[0]===dropped)[1]===v[1];
+      d.classList.add(correct?"correct":"wrong");
+      addScore(correct?10:-5);
+    };
+    defsEl.appendChild(d);
+  });
+}
+
+/* INIT */
+startFlash();
+</script>
+</body>
+</html>
